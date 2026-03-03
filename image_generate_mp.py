@@ -498,14 +498,16 @@ def _process_one_symbol(task):
         g = g.reindex(trading_calendar)
 
     # 生成图片
+    idx = g.index  # 提前拿出来，避免循环里重复取
     for n in windows:
         if len(g) < n:
             continue
 
+        # 目录结构：out_dir/N{n}/{sym}/
         window_out_dir = os.path.join(out_dir, f"N{n}")
-        os.makedirs(window_out_dir, exist_ok=True)
+        sym_out_dir = os.path.join(window_out_dir, str(sym))
+        os.makedirs(sym_out_dir, exist_ok=True)
 
-        idx = g.index
         for end_i in range(n - 1, len(g), step):
             start_i = end_i - n + 1
             win = g.iloc[start_i:end_i + 1]
@@ -524,10 +526,84 @@ def _process_one_symbol(task):
 
             end_date = idx[end_i].strftime("%Y%m%d")
             fname = f"{sym}_end{end_date}_N{n}.png"
-            img.save(os.path.join(window_out_dir, fname))
+            img.save(os.path.join(sym_out_dir, fname))
 
-    # 返回 sym 便于主进程统计/显示
     return sym
+
+
+# def _process_one_symbol(task):
+#     """
+#     task: (sym, start, end) 其中 start/end 是 df 中该股票所在的行切片范围 [start, end)
+#     """
+#     sym, start, end = task
+#     df = _G["df"]
+#     out_dir = _G["out_dir"]
+#     windows = _G["windows"]
+#     spec = _G["spec"]
+#     symbol_col = _G["symbol_col"]
+#     date_col = _G["date_col"]
+#     price_cols = _G["price_cols"]
+#     volume_col = _G["volume_col"]
+#     trading_calendar = _G["trading_calendar"]
+#     step = _G["step"]
+
+#     # 取出该股票数据（不复制大表，只做 iloc 切片）
+#     g = df.iloc[start:end].copy()
+#     g[date_col] = pd.to_datetime(g[date_col])
+#     g = g.sort_values(date_col).set_index(date_col)
+
+#     # 识别“非交易日行”：volume<=0 且 O=H=L=C
+#     op, hi, lo, cl = price_cols
+#     if volume_col in g.columns:
+#         v0 = g[volume_col].astype(float).fillna(0) <= 0
+#     else:
+#         v0 = False
+
+#     o_ = g[op].astype(float)
+#     h_ = g[hi].astype(float)
+#     l_ = g[lo].astype(float)
+#     c_ = g[cl].astype(float)
+
+#     no_trade = v0 & (o_ == h_) & (h_ == l_) & (l_ == c_)
+
+#     g.loc[no_trade, list(price_cols)] = np.nan
+#     if volume_col in g.columns:
+#         g.loc[no_trade, volume_col] = np.nan
+
+#     if trading_calendar is not None:
+#         g = g.reindex(trading_calendar)
+
+#     # 生成图片
+#     for n in windows:
+#         if len(g) < n:
+#             continue
+
+#         window_out_dir = os.path.join(out_dir, f"N{n}")
+#         os.makedirs(window_out_dir, exist_ok=True)
+
+#         idx = g.index
+#         for end_i in range(n - 1, len(g), step):
+#             start_i = end_i - n + 1
+#             win = g.iloc[start_i:end_i + 1]
+#             if len(win) != n:
+#                 continue
+
+#             img = build_window_image(
+#                 win=win,
+#                 n=n,
+#                 spec=spec,
+#                 price_cols=price_cols,
+#                 volume_col=volume_col,
+#             )
+#             if img is None:
+#                 continue
+
+#             end_date = idx[end_i].strftime("%Y%m%d")
+#             fname = f"{sym}_end{end_date}_N{n}.png"
+#             img.save(os.path.join(window_out_dir, fname))
+
+#     # 返回 sym 便于主进程统计/显示
+#     return sym
 
 
 def generate_images_mp(
@@ -545,6 +621,8 @@ def generate_images_mp(
     chunksize: int = 1,
 ) -> None:
     os.makedirs(out_dir, exist_ok=True)
+    for n in windows:
+        os.makedirs(os.path.join(out_dir, f"N{n}"), exist_ok=True)
 
     # 非常关键：按 symbol/date 排序 + reset_index，保证每个 symbol 的行在 df 里是连续块
     df = df.copy()
