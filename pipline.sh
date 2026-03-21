@@ -102,21 +102,35 @@ set -euo pipefail
 # =========================
 PYTHON_BIN="python"
 
-SCRIPT_DIR="/workspace"
+SCRIPT_DIR="/workspace/vit_stock"
 
-LABEL_DIR="/workspace/label_npz"
-SYMBOL_TAR_DIR="/workspace/symbol_to_tar"
-PRED_DIR="/workspace/predict"
+LABEL_DIR="/workspace/vit_stock_data/label_npz"
+SYMBOL_TAR_DIR="/workspace/vit_stock/symbol_to_tar"
+PRED_DIR="/workspace/vit_stock_data/predict"
 
-CSV_ROOT="/workspace/stock_data_csv"
+CSV_ROOT="/workspace/stock_csv_8year"
 
-EXP_I20_R5="/workspace/exp_I20_R5_vitb_in21k"
-EXP_I5_R5="/workspace/exp_I5_R5_vitb_in21k"
+# EXP_I20_R5="/workspace/exp_I20_R5_vitb_in21k"
+EXP_I20_R20="/workspace/exp_I20_R20_vitb_in21k"
+EXP_I5_R20="/workspace/exp_I5_R20_vitb_in21k"
+EXP_I60_R20="/workspace/exp_I60_R20_vitb_in21k"
 
-BACKTEST_I20_R5_EQUAL="/workspace/backtest_I20_R5_equal"
-BACKTEST_I20_R5_VALUE="/workspace/backtest_I20_R5_value"
-BACKTEST_I5_R5_EQUAL="/workspace/backtest_I5_R5_equal"
-BACKTEST_I5_R5_VALUE="/workspace/backtest_I5_R5_value"
+EXP_I20_R60="/workspace/exp_I20_R60_vitb_in21k"
+EXP_I5_R60="/workspace/exp_I5_R60_vitb_in21k"
+EXP_I60_R60="/workspace/exp_I60_R60_vitb_in21k"
+
+# BACKTEST_I20_R5_EQUAL="/workspace/backtest_I20_R5_equal"
+# BACKTEST_I20_R5_VALUE="/workspace/backtest_I20_R5_value"
+# BACKTEST_I5_R5_EQUAL="/workspace/backtest_I5_R5_equal"
+# BACKTEST_I5_R5_VALUE="/workspace/backtest_I5_R5_value"
+
+BACKTEST_I20_R20_EQUAL="/workspace/backtest_I20_R20_equal"
+BACKTEST_I5_R20_EQUAL="/workspace/backtest_I5_R20_equal"
+BACKTEST_I60_R20_EQUAL="/workspace/backtest_I60_R20_equal"
+
+BACKTEST_I20_R60_EQUAL="/workspace/backtest_I20_R60_equal"
+BACKTEST_I5_R60_EQUAL="/workspace/backtest_I5_R60_equal"
+BACKTEST_I60_R60_EQUAL="/workspace/backtest_I60_R60_equal"
 
 # =========================
 # 创建目录
@@ -137,39 +151,180 @@ BACKTEST_I5_R5_VALUE="/workspace/backtest_I5_R5_value"
 # =========================
 # 1) 建立 symbol -> tar 映射
 # =========================
-echo "===== build symbol_to_tar for N20 ====="
-"${PYTHON_BIN}" "${SCRIPT_DIR}/build_symbol_to_tar.py" \
-    --tar_dir /workspace/ohlc_image_N20/packs \
-    --out_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N20.json"
+# echo "===== build symbol_to_tar for N20 ====="
+# "${PYTHON_BIN}" "${SCRIPT_DIR}/build_symbol_to_tar.py" \
+#     --tar_dir /workspace/ohlc_image_N20/packs \
+#     --out_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N20.json"
 
-echo "===== build symbol_to_tar for N5 ====="
-"${PYTHON_BIN}" "${SCRIPT_DIR}/build_symbol_to_tar.py" \
-    --tar_dir /workspace/ohlc_image_N5/packs \
-    --out_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N5.json"
+# echo "===== build symbol_to_tar for N5 ====="
+# "${PYTHON_BIN}" "${SCRIPT_DIR}/build_symbol_to_tar.py" \
+#     --tar_dir /workspace/ohlc_image_N5/packs \
+#     --out_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N5.json"
 
 # =========================
 # 2) 清洗 meta，输出 clean npz
 # =========================
-echo "===== clean meta N20 ====="
-"${PYTHON_BIN}" "${SCRIPT_DIR}/clean_meta_by_tar.py" \
-    --meta_path "${LABEL_DIR}/meta_N20.npz" \
-    --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N20.json" \
-    --out_meta_path "${LABEL_DIR}/meta_N20_clean.npz"
+# echo "===== clean meta N20 ====="
+# "${PYTHON_BIN}" "${SCRIPT_DIR}/clean_meta_by_tar.py" \
+#     --meta_path "${LABEL_DIR}/meta_N20.npz" \
+#     --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N20.json" \
+#     --out_meta_path "${LABEL_DIR}/meta_N20_clean.npz"
 
-echo "===== clean meta N5 ====="
-"${PYTHON_BIN}" "${SCRIPT_DIR}/clean_meta_by_tar.py" \
-    --meta_path "${LABEL_DIR}/meta_N5.npz" \
-    --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N5.json" \
-    --out_meta_path "${LABEL_DIR}/meta_N5_clean.npz"
+# echo "===== clean meta N5 ====="
+# "${PYTHON_BIN}" "${SCRIPT_DIR}/clean_meta_by_tar.py" \
+#     --meta_path "${LABEL_DIR}/meta_N5.npz" \
+#     --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N5.json" \
+#     --out_meta_path "${LABEL_DIR}/meta_N5_clean.npz"
 
 # =========================
-# 3) 训练 I20 / R5
+# 3) 训练 I20
 # =========================
-echo "===== train I20 / R5 ====="
+# echo "===== train I20 / R5 ====="
+# "${PYTHON_BIN}" "${SCRIPT_DIR}/train.py" \
+#   --meta_path "${LABEL_DIR}/meta_N20_clean.npz" \
+#   --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N20.json" \
+#   --horizon_idx 0 \
+#   --hf_model_name google/vit-base-patch16-224-in21k \
+#   --epochs 5 \
+#   --batch_size 64 \
+#   --lr 1e-4 \
+#   --weight_decay 1e-4 \
+#   --num_workers 12 \
+#   --seed 20260315 \
+#   --patch_size 16 \
+#   --repeat_to_3ch \
+#   --warmup_ratio 0.05 \
+#   --step_log_interval 200 \
+#   --step_log_file metrics_step.csv \
+#   --out_dir "${EXP_I20_R5}"
+
+# echo "===== train I20 / R20 ====="
+# "${PYTHON_BIN}" "${SCRIPT_DIR}/train.py" \
+#   --meta_path "${LABEL_DIR}/meta_N20_clean.npz" \
+#   --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N20.json" \
+#   --horizon_idx 1 \
+#   --hf_model_name google/vit-base-patch16-224-in21k \
+#   --epochs 5 \
+#   --batch_size 64 \
+#   --lr 1e-4 \
+#   --weight_decay 1e-4 \
+#   --num_workers 12 \
+#   --seed 20260315 \
+#   --patch_size 16 \
+#   --repeat_to_3ch \
+#   --warmup_ratio 0.05 \
+#   --step_log_interval 200 \
+#   --step_log_file metrics_step.csv \
+#   --out_dir "${EXP_I20_R20}"
+
+# echo "===== train I20 / R60 ====="
+# "${PYTHON_BIN}" "${SCRIPT_DIR}/train.py" \
+#   --meta_path "${LABEL_DIR}/meta_N20_clean.npz" \
+#   --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N20.json" \
+#   --horizon_idx 2 \
+#   --hf_model_name google/vit-base-patch16-224-in21k \
+#   --epochs 5 \
+#   --batch_size 64 \
+#   --lr 1e-4 \
+#   --weight_decay 1e-4 \
+#   --num_workers 12 \
+#   --seed 20260315 \
+#   --patch_size 16 \
+#   --repeat_to_3ch \
+#   --warmup_ratio 0.05 \
+#   --step_log_interval 200 \
+#   --step_log_file metrics_step.csv \
+#   --out_dir "${EXP_I20_R60}"
+
+# # =========================
+# # 4) 训练 I5 
+# # =========================
+# # echo "===== train I5 / R5 ====="
+# # "${PYTHON_BIN}" "${SCRIPT_DIR}/train.py" \
+# #   --meta_path "${LABEL_DIR}/meta_N5_clean.npz" \
+# #   --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N5.json" \
+# #   --horizon_idx 0 \
+# #   --hf_model_name google/vit-base-patch16-224-in21k \
+# #   --epochs 5 \
+# #   --batch_size 64 \
+# #   --lr 1e-4 \
+# #   --weight_decay 1e-4 \
+# #   --num_workers 12 \
+# #   --seed 20260315 \
+# #   --patch_size 16 \
+# #   --repeat_to_3ch \
+# #   --warmup_ratio 0.05 \
+# #   --step_log_interval 200 \
+# #   --step_log_file metrics_step.csv \
+# #   --out_dir "${EXP_I5_R5}"
+
+# echo "===== train I5 / R20 ====="
+# "${PYTHON_BIN}" "${SCRIPT_DIR}/train.py" \
+#   --meta_path "${LABEL_DIR}/meta_N5_clean.npz" \
+#   --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N5.json" \
+#   --horizon_idx 1 \
+#   --hf_model_name google/vit-base-patch16-224-in21k \
+#   --epochs 5 \
+#   --batch_size 64 \
+#   --lr 1e-4 \
+#   --weight_decay 1e-4 \
+#   --num_workers 12 \
+#   --seed 20260315 \
+#   --patch_size 16 \
+#   --repeat_to_3ch \
+#   --warmup_ratio 0.05 \
+#   --step_log_interval 200 \
+#   --step_log_file metrics_step.csv \
+#   --out_dir "${EXP_I5_R20}"
+
+# echo "===== train I5 / R60 ====="
+# "${PYTHON_BIN}" "${SCRIPT_DIR}/train.py" \
+#   --meta_path "${LABEL_DIR}/meta_N5_clean.npz" \
+#   --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N5.json" \
+#   --horizon_idx 2 \
+#   --hf_model_name google/vit-base-patch16-224-in21k \
+#   --epochs 5 \
+#   --batch_size 64 \
+#   --lr 1e-4 \
+#   --weight_decay 1e-4 \
+#   --num_workers 12 \
+#   --seed 20260315 \
+#   --patch_size 16 \
+#   --repeat_to_3ch \
+#   --warmup_ratio 0.05 \
+#   --step_log_interval 200 \
+#   --step_log_file metrics_step.csv \
+#   --out_dir "${EXP_I5_R60}"
+
+
+# # =========================
+# # 5) 训练 I60 
+# # =========================
+
+# echo "===== train I60 / R20 ====="
+# "${PYTHON_BIN}" "${SCRIPT_DIR}/train.py" \
+#   --meta_path "${LABEL_DIR}/meta_N60_clean.npz" \
+#   --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N60.json" \
+#   --horizon_idx 1 \
+#   --hf_model_name google/vit-base-patch16-224-in21k \
+#   --epochs 5 \
+#   --batch_size 64 \
+#   --lr 1e-4 \
+#   --weight_decay 1e-4 \
+#   --num_workers 12 \
+#   --seed 20260315 \
+#   --patch_size 16 \
+#   --repeat_to_3ch \
+#   --warmup_ratio 0.05 \
+#   --step_log_interval 200 \
+#   --step_log_file metrics_step.csv \
+#   --out_dir "${EXP_I60_R20}"
+
+echo "===== train I60 / R60 ====="
 "${PYTHON_BIN}" "${SCRIPT_DIR}/train.py" \
-  --meta_path "${LABEL_DIR}/meta_N20_clean.npz" \
-  --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N20.json" \
-  --horizon_idx 0 \
+  --meta_path "${LABEL_DIR}/meta_N60_clean.npz" \
+  --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N60.json" \
+  --horizon_idx 2 \
   --hf_model_name google/vit-base-patch16-224-in21k \
   --epochs 5 \
   --batch_size 64 \
@@ -182,73 +337,120 @@ echo "===== train I20 / R5 ====="
   --warmup_ratio 0.05 \
   --step_log_interval 200 \
   --step_log_file metrics_step.csv \
-  --out_dir "${EXP_I20_R5}"
+  --out_dir "${EXP_I60_R60}"
 
 # =========================
-# 4) 训练 I5 / R5
+# 6) 推断 I20 的 test 预测
 # =========================
-echo "===== train I5 / R5 ====="
-"${PYTHON_BIN}" "${SCRIPT_DIR}/train.py" \
-  --meta_path "${LABEL_DIR}/meta_N5_clean.npz" \
-  --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N5.json" \
-  --horizon_idx 0 \
-  --hf_model_name google/vit-base-patch16-224-in21k \
-  --epochs 5 \
-  --batch_size 64 \
-  --lr 1e-4 \
-  --weight_decay 1e-4 \
-  --num_workers 12 \
-  --seed 20260315 \
-  --patch_size 16 \
-  --repeat_to_3ch \
-  --warmup_ratio 0.05 \
-  --step_log_interval 200 \
-  --step_log_file metrics_step.csv \
-  --out_dir "${EXP_I5_R5}"
-
-# =========================
-# 5) 推断 I20 / R5 的 test 预测
-# =========================
-echo "===== infer test I20 / R5 ====="
+echo "===== infer test I20 / R20 ====="
 "${PYTHON_BIN}" "${SCRIPT_DIR}/infer_test.py" \
   --meta_path "${LABEL_DIR}/meta_N20_clean.npz" \
   --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N20.json" \
-  --checkpoint "${EXP_I20_R5}/best.pt" \
-  --horizon_idx 0 \
+  --checkpoint "${EXP_I20_R20}/best.pt" \
+  --horizon_idx 1 \
   --batch_size 128 \
   --num_workers 12 \
   --patch_size 16 \
   --repeat_to_3ch \
-  --out_csv "${PRED_DIR}/preds_I20_R5.csv"
+  --out_csv "${PRED_DIR}/preds_I20_R20.csv"
+
+echo "===== infer test I20 / R60 ====="
+"${PYTHON_BIN}" "${SCRIPT_DIR}/infer_test.py" \
+  --meta_path "${LABEL_DIR}/meta_N20_clean.npz" \
+  --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N20.json" \
+  --checkpoint "${EXP_I20_R60}/best.pt" \
+  --horizon_idx 2 \
+  --batch_size 128 \
+  --num_workers 12 \
+  --patch_size 16 \
+  --repeat_to_3ch \
+  --out_csv "${PRED_DIR}/preds_I20_R60.csv"
 
 # =========================
-# 6) 推断 I5 / R5 的 test 预测
+# 7) 推断 I5 的 test 预测
 # =========================
-echo "===== infer test I5 / R5 ====="
+echo "===== infer test I5 / R20 ====="
 "${PYTHON_BIN}" "${SCRIPT_DIR}/infer_test.py" \
   --meta_path "${LABEL_DIR}/meta_N5_clean.npz" \
   --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N5.json" \
-  --checkpoint "${EXP_I5_R5}/best.pt" \
-  --horizon_idx 0 \
+  --checkpoint "${EXP_I5_R20}/best.pt" \
+  --horizon_idx 1 \
   --batch_size 128 \
   --num_workers 12 \
   --patch_size 16 \
   --repeat_to_3ch \
-  --out_csv "${PRED_DIR}/preds_I5_R5.csv"
+  --out_csv "${PRED_DIR}/preds_I5_R20.csv"
+
+echo "===== infer test I5 / R60 ====="
+"${PYTHON_BIN}" "${SCRIPT_DIR}/infer_test.py" \
+  --meta_path "${LABEL_DIR}/meta_N5_clean.npz" \
+  --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N5.json" \
+  --checkpoint "${EXP_I5_R60}/best.pt" \
+  --horizon_idx 2 \
+  --batch_size 128 \
+  --num_workers 12 \
+  --patch_size 16 \
+  --repeat_to_3ch \
+  --out_csv "${PRED_DIR}/preds_I5_R60.csv"
 
 # =========================
-# 7) 回测 I20 / R5 - equal-weight
+# 8) 推断 I60 的 test 预测
 # =========================
-echo "===== backtest I20 / R5 - equal-weight ====="
+
+echo "===== infer test I60 / R20 ====="
+"${PYTHON_BIN}" "${SCRIPT_DIR}/infer_test.py" \
+  --meta_path "${LABEL_DIR}/meta_N60_clean.npz" \
+  --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N60.json" \
+  --checkpoint "${EXP_I60_R20}/best.pt" \
+  --horizon_idx 1 \
+  --batch_size 128 \
+  --num_workers 12 \
+  --patch_size 16 \
+  --repeat_to_3ch \
+  --out_csv "${PRED_DIR}/preds_I60_R20.csv"
+
+
+echo "===== infer test I60 / R60 ====="
+"${PYTHON_BIN}" "${SCRIPT_DIR}/infer_test.py" \
+  --meta_path "${LABEL_DIR}/meta_N60_clean.npz" \
+  --symbol_to_tar_json "${SYMBOL_TAR_DIR}/symbol_to_tar_N60.json" \
+  --checkpoint "${EXP_I60_R60}/best.pt" \
+  --horizon_idx 2 \
+  --batch_size 128 \
+  --num_workers 12 \
+  --patch_size 16 \
+  --repeat_to_3ch \
+  --out_csv "${PRED_DIR}/preds_I60_R60.csv"
+
+# =========================
+# 9) 回测 I20 - equal-weight
+# =========================
+# echo "===== backtest I20 / R5 - equal-weight ====="
+# "${PYTHON_BIN}" "${SCRIPT_DIR}/portfolio_backtest.py" \
+#   --pred_csv "${PRED_DIR}/preds_I20_R5.csv" \
+#   --csv_root "${CSV_ROOT}" \
+#   --horizon_days 5 \
+#   --weighting equal \
+#   --out_dir "${BACKTEST_I20_R5_EQUAL}"
+
+echo "===== backtest I20 / R20 - equal-weight ====="
 "${PYTHON_BIN}" "${SCRIPT_DIR}/portfolio_backtest.py" \
-  --pred_csv "${PRED_DIR}/preds_I20_R5.csv" \
+  --pred_csv "${PRED_DIR}/preds_I20_R20.csv" \
   --csv_root "${CSV_ROOT}" \
-  --horizon_days 5 \
+  --horizon_days 20 \
   --weighting equal \
-  --out_dir "${BACKTEST_I20_R5_EQUAL}"
+  --out_dir "${BACKTEST_I20_R20_EQUAL}"
+
+echo "===== backtest I20 / R60 - equal-weight ====="
+"${PYTHON_BIN}" "${SCRIPT_DIR}/portfolio_backtest.py" \
+  --pred_csv "${PRED_DIR}/preds_I20_R60.csv" \
+  --csv_root "${CSV_ROOT}" \
+  --horizon_days 60 \
+  --weighting equal \
+  --out_dir "${BACKTEST_I20_R60_EQUAL}"
 
 # =========================
-# 8) 回测 I20 / R5 - value-weight
+# 10) 回测 I20 - value-weight
 # =========================
 # echo "===== backtest I20 / R5 - value-weight ====="
 # "${PYTHON_BIN}" "${SCRIPT_DIR}/portfolio_backtest.py" \
@@ -260,18 +462,34 @@ echo "===== backtest I20 / R5 - equal-weight ====="
 #   --out_dir "${BACKTEST_I20_R5_VALUE}"
 
 # =========================
-# 9) 回测 I5 / R5 - equal-weight
+#11) 回测 I5 - equal-weight
 # =========================
-echo "===== backtest I5 / R5 - equal-weight ====="
+# echo "===== backtest I5 / R5 - equal-weight ====="
+# "${PYTHON_BIN}" "${SCRIPT_DIR}/portfolio_backtest.py" \
+#   --pred_csv "${PRED_DIR}/preds_I5_R5.csv" \
+#   --csv_root "${CSV_ROOT}" \
+#   --horizon_days 5 \
+#   --weighting equal \
+#   --out_dir "${BACKTEST_I5_R5_EQUAL}"
+
+echo "===== backtest I5 / R20 - equal-weight ====="
 "${PYTHON_BIN}" "${SCRIPT_DIR}/portfolio_backtest.py" \
-  --pred_csv "${PRED_DIR}/preds_I5_R5.csv" \
+  --pred_csv "${PRED_DIR}/preds_I5_R20.csv" \
   --csv_root "${CSV_ROOT}" \
-  --horizon_days 5 \
+  --horizon_days 20 \
   --weighting equal \
-  --out_dir "${BACKTEST_I5_R5_EQUAL}"
+  --out_dir "${BACKTEST_I5_R20_EQUAL}"
+
+echo "===== backtest I5 / R60 - equal-weight ====="
+"${PYTHON_BIN}" "${SCRIPT_DIR}/portfolio_backtest.py" \
+  --pred_csv "${PRED_DIR}/preds_I5_R60.csv" \
+  --csv_root "${CSV_ROOT}" \
+  --horizon_days 60 \
+  --weighting equal \
+  --out_dir "${BACKTEST_I5_R60_EQUAL}"
 
 # =========================
-# 10) 回测 I5 / R5 - value-weight
+# 12) 回测 I5 / R5 - value-weight
 # =========================
 # echo "===== backtest I5 / R5 - value-weight ====="
 # "${PYTHON_BIN}" "${SCRIPT_DIR}/portfolio_backtest.py" \
@@ -281,5 +499,26 @@ echo "===== backtest I5 / R5 - equal-weight ====="
 #   --weighting value \
 #   --cap_col 日个股流通市值 \
 #   --out_dir "${BACKTEST_I5_R5_VALUE}"
+
+
+# =========================
+#13) 回测 I60 - equal-weight
+# =========================
+
+echo "===== backtest I60 / R20 - equal-weight ====="
+"${PYTHON_BIN}" "${SCRIPT_DIR}/portfolio_backtest.py" \
+  --pred_csv "${PRED_DIR}/preds_I60_R20.csv" \
+  --csv_root "${CSV_ROOT}" \
+  --horizon_days 20 \
+  --weighting equal \
+  --out_dir "${BACKTEST_I60_R20_EQUAL}"
+
+echo "===== backtest I60 / R60 - equal-weight ====="
+"${PYTHON_BIN}" "${SCRIPT_DIR}/portfolio_backtest.py" \
+  --pred_csv "${PRED_DIR}/preds_I60_R60.csv" \
+  --csv_root "${CSV_ROOT}" \
+  --horizon_days 60 \
+  --weighting equal \
+  --out_dir "${BACKTEST_I60_R60_EQUAL}"
 
 echo "===== all done ====="
