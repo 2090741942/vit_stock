@@ -20,13 +20,13 @@ set -euo pipefail
 # - 输出预测 CSV 后，你可以再用 portfolio_backtest.py 批量回测。
 # ============================================================
 
-WORKDIR="/workspace"
+WORKDIR="/workspace/vit_stock"
 
 TRAIN_PY="${WORKDIR}/train_cnn.py"
 INFER_PY="${WORKDIR}/infer_test_cnn.py"
 
 # ===== 基础数据路径 =====
-LABEL_DIR="${WORKDIR}/label_npz"
+LABEL_DIR="/workspace/vit_stock_data/label_npz"
 SYMBOL_TO_TAR_DIR="${WORKDIR}/symbol_to_tar"
 
 # ===== 训练超参（统一给 9 个模型）=====
@@ -37,7 +37,7 @@ NUM_WORKERS=8
 PATCH_SIZE=16
 SEED=20260321
 WARMUP_RATIO=0.05
-STEP_LOG_INTERVAL=100
+STEP_LOG_INTERVAL=500
 
 # ===== CNN 结构 / 预处理参数 =====
 DROPOUT=0.5
@@ -47,8 +47,8 @@ STATS_MODE="approx"      # full / approx / manual
 STATS_BATCHES=50
 
 # ===== 输出根目录 =====
-TRAIN_ROOT="${WORKDIR}/outs"
-PRED_ROOT="${WORKDIR}/predict"
+TRAIN_ROOT="/workspace/cnn_outs"
+PRED_ROOT="/workspace/vit_stock_data/predict"
 
 mkdir -p "${TRAIN_ROOT}" "${PRED_ROOT}"
 
@@ -167,6 +167,51 @@ run_one_task() {
   echo "[OK] Finished ${EXP_NAME}"
 }
 
+# ===== 回测脚本与数据路径 =====
+BACKTEST_PY="${WORKDIR}/portfolio_backtest.py"
+CSV_ROOT="$/workspace/stock_csv_8year"
+BACKTEST_ROOT="/workspace/vit_stock_data/backtest"
+
+mkdir -p "${BACKTEST_ROOT}"
+
+run_one_backtest() {
+  local WINDOW="$1"
+  local HORIZON_IDX="$2"
+
+  local HORIZON_DAYS
+  if [[ "${HORIZON_IDX}" == "0" ]]; then
+    HORIZON_DAYS=5
+  elif [[ "${HORIZON_IDX}" == "1" ]]; then
+    HORIZON_DAYS=20
+  elif [[ "${HORIZON_IDX}" == "2" ]]; then
+    HORIZON_DAYS=60
+  else
+    echo "[ERROR] invalid HORIZON_IDX=${HORIZON_IDX}"
+    exit 1
+  fi
+
+  local EXP_NAME="I${WINDOW}_R${HORIZON_DAYS}_cnn"
+  local PRED_CSV="${PRED_ROOT}/preds_${EXP_NAME}.csv"
+  local OUT_DIR="${BACKTEST_ROOT}/backtest_${EXP_NAME}_equal"
+
+  echo
+  echo "==================== BACKTEST ${EXP_NAME} ===================="
+
+  if [[ ! -f "${PRED_CSV}" ]]; then
+    echo "[ERROR] prediction csv not found: ${PRED_CSV}"
+    exit 1
+  fi
+
+  python "${BACKTEST_PY}" \
+    --pred_csv "${PRED_CSV}" \
+    --csv_root "${CSV_ROOT}" \
+    --horizon_days "${HORIZON_DAYS}" \
+    --weighting equal \
+    --out_dir "${OUT_DIR}"
+
+  echo "[OK] Finished backtest for ${EXP_NAME}"
+}
+
 # ============================================================
 # 3 × 3 全部任务
 # ============================================================
@@ -191,4 +236,28 @@ echo "============================================================"
 echo "[ALL DONE] 9 CNN models have been trained and inferred."
 echo "[INFO] Training outputs are under: ${TRAIN_ROOT}"
 echo "[INFO] Prediction csvs are under: ${PRED_ROOT}"
+echo "============================================================"
+
+# ============================================================
+# 9 个模型批量回测
+# ============================================================
+
+run_one_backtest 5 0
+run_one_backtest 5 1
+run_one_backtest 5 2
+
+run_one_backtest 20 0
+run_one_backtest 20 1
+run_one_backtest 20 2
+
+run_one_backtest 60 0
+run_one_backtest 60 1
+run_one_backtest 60 2
+
+echo
+echo "============================================================"
+echo "[ALL DONE] 9 CNN models have been trained, inferred, and backtested."
+echo "[INFO] Training outputs are under: ${TRAIN_ROOT}"
+echo "[INFO] Prediction csvs are under: ${PRED_ROOT}"
+echo "[INFO] Backtest outputs are under: ${BACKTEST_ROOT}"
 echo "============================================================"
