@@ -56,7 +56,7 @@ STATS_BATCHES=50
 TRAIN_ROOT="/workspace/cnn_outs"
 PRED_ROOT="/workspace/vit_stock_data/predict"
 BACKTEST_ROOT="/workspace/vit_stock_data/backtest"
-LOG_ROOT="/workspace/vit_stock_data/logs_cnn_parallel"
+LOG_ROOT="/workspace/logs_cnn"
 
 mkdir -p "${TRAIN_ROOT}" "${PRED_ROOT}" "${BACKTEST_ROOT}" "${LOG_ROOT}"
 
@@ -231,9 +231,15 @@ run_window_parallel() {
 # ============================================================
 # 主流程：窗口间串行，窗口内并行
 # ============================================================
-run_window_parallel 5
-run_window_parallel 20
-run_window_parallel 60
+# run_window_parallel 5
+# run_window_parallel 20
+# run_window_parallel 60
+
+run_one_task 20 0
+
+run_one_task 20 1
+
+run_one_task 20 2
 
 echo
 echo "============================================================"
