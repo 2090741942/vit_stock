@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from tqdm.auto import tqdm
 
-from dataset import build_dataloader, get_target_width
+from vit_stock.data.dataset import build_dataloader, get_target_width
 
 
 # =========================

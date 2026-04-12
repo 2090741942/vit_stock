@@ -13,13 +13,15 @@ from tqdm.auto import tqdm
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
+import timm
 
-from transformers import Dinov2Config, Dinov2ForImageClassification
 from transformers import get_cosine_schedule_with_warmup
 
-from dataset import build_dataloader, get_target_width
+from vit_stock.data.dataset import build_dataloader, get_target_width
+
+
+IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
 
 def set_seed(seed: int) -> None:
@@ -43,12 +45,6 @@ def horizon_idx_to_days(horizon_idx: int) -> int:
     return mapping[horizon_idx]
 
 
-def ceil_to_multiple(x: int, multiple: int) -> int:
-    if multiple <= 0:
-        raise ValueError(f"multiple must be positive, got {multiple}")
-    return ((x + multiple - 1) // multiple) * multiple
-
-
 def count_split_stats(meta_path: str, split: str, horizon_idx: int) -> Dict[str, int]:
     split_map = {"train": 0, "val": 1, "test": 2}
     if split not in split_map:
@@ -61,7 +57,7 @@ def count_split_stats(meta_path: str, split: str, horizon_idx: int) -> Dict[str,
     splits = meta["split"]
 
     y = labels[:, horizon_idx]
-    split_mask = (splits == split_map[split])
+    split_mask = splits == split_map[split]
 
     raw_split_rows = int(split_mask.sum())
     valid_label_rows = int(((split_mask) & (y != -1)).sum())
@@ -105,65 +101,42 @@ def save_checkpoint(
     )
 
 
-IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-
-
-def normalize_for_dinov2(images: torch.Tensor) -> torch.Tensor:
+def normalize_for_deit(images: torch.Tensor) -> torch.Tensor:
     mean = IMAGENET_MEAN.to(device=images.device, dtype=images.dtype)
     std = IMAGENET_STD.to(device=images.device, dtype=images.dtype)
     return (images - mean) / std
 
 
-def pad_to_square(images: torch.Tensor, target_side: int) -> torch.Tensor:
-    if images.ndim != 4:
-        raise ValueError(f"images must be [B,C,H,W], got {tuple(images.shape)}")
-
-    _, _, h, w = images.shape
-    if h > target_side or w > target_side:
-        raise ValueError(f"current shape {(h, w)} is larger than target_side={target_side}")
-
-    pad_h = target_side - h
-    pad_w = target_side - w
-    return F.pad(images, (0, pad_w, 0, pad_h), mode="constant", value=0.0)
-
-
-class HFDinoV2BinaryClassifier(nn.Module):
+class TIMMDeiT3BinaryClassifier(nn.Module):
     def __init__(
         self,
-        model_name: str = "facebook/dinov2-base-imagenet1k-1-layer",
+        model_name: str = "deit3_base_patch16_224.fb_in22k_ft_in1k",
         num_labels: int = 2,
-        image_size: int = 224,
+        img_size: tuple[int, int] = (96, 192),
+        drop_rate: float = 0.0,
+        drop_path_rate: float = 0.0,
     ) -> None:
         super().__init__()
-
-        config = Dinov2Config.from_pretrained(model_name)
-        config.num_labels = num_labels
-        config.image_size = int(image_size)
-
-        self.model = Dinov2ForImageClassification.from_pretrained(
+        self.model = timm.create_model(
             model_name,
-            config=config,
-            ignore_mismatched_sizes=True,
+            pretrained=True,
+            num_classes=num_labels,
+            img_size=img_size,
+            in_chans=3,
+            drop_rate=drop_rate,
+            drop_path_rate=drop_path_rate,
         )
 
-        for p in self.model.parameters():
-            p.requires_grad = True
-
-        self.patch_size = int(config.patch_size)
-
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        outputs = self.model(pixel_values=pixel_values)
-        return outputs.logits
+        return self.model(pixel_values)
 
 
 @torch.no_grad()
 def evaluate(
     model: nn.Module,
-    loader: DataLoader,
+    loader,
     criterion: nn.Module,
     device: torch.device,
-    model_side: int,
     desc: str = "Eval",
 ) -> Dict[str, float]:
     model.eval()
@@ -173,14 +146,11 @@ def evaluate(
     total_samples = 0
 
     pbar = tqdm(loader, desc=desc, leave=False, dynamic_ncols=True)
-
     for images, targets in pbar:
         images = images.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
-        images = pad_to_square(images, target_side=model_side)
-        images = normalize_for_dinov2(images)
-
+        images = normalize_for_deit(images)
         logits = model(images)
         loss = criterion(logits, targets)
 
@@ -191,29 +161,24 @@ def evaluate(
 
         running_loss = total_loss / max(total_samples, 1)
         running_acc = total_correct / max(total_samples, 1)
-
         pbar.set_postfix(loss=f"{running_loss:.4f}", acc=f"{running_acc:.4f}", bs=batch_size)
 
-    avg_loss = total_loss / max(total_samples, 1)
-    avg_acc = total_correct / max(total_samples, 1)
-
     return {
-        "loss": avg_loss,
-        "acc": avg_acc,
+        "loss": total_loss / max(total_samples, 1),
+        "acc": total_correct / max(total_samples, 1),
         "num_samples": total_samples,
+        "num_steps": len(loader),
     }
 
 
 def train_one_epoch(
     model: nn.Module,
-    loader: DataLoader,
+    loader,
     criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
     scheduler,
     device: torch.device,
-    model_side: int,
     epoch: int,
-    total_epochs: int,
     step_log_interval: int,
     step_csv_path: str,
     global_step_start: int,
@@ -225,17 +190,14 @@ def train_one_epoch(
     total_samples = 0
     start_time = time.time()
 
-    pbar = tqdm(loader, desc=f"Train {epoch}/{total_epochs}", leave=True, dynamic_ncols=True)
-
+    pbar = tqdm(loader, desc=f"Train Epoch {epoch}", dynamic_ncols=True)
     for step, (images, targets) in enumerate(pbar, start=1):
         images = images.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
-        images = pad_to_square(images, target_side=model_side)
-        images = normalize_for_dinov2(images)
+        images = normalize_for_deit(images)
 
         optimizer.zero_grad(set_to_none=True)
-
         logits = model(images)
         loss = criterion(logits, targets)
         loss.backward()
@@ -250,35 +212,28 @@ def train_one_epoch(
         running_loss = total_loss / max(total_samples, 1)
         running_acc = total_correct / max(total_samples, 1)
         current_lr = optimizer.param_groups[0]["lr"]
-
         global_step = global_step_start + step
 
         if step_log_interval > 0 and (step % step_log_interval == 0):
-            step_row = {
-                "epoch": epoch,
-                "step_in_epoch": step,
-                "global_step": global_step,
-                "lr": current_lr,
-                "running_train_loss": running_loss,
-                "running_train_acc": running_acc,
-                "batch_size": batch_size,
-            }
-            append_metrics_csv(step_csv_path, step_row)
+            append_metrics_csv(
+                step_csv_path,
+                {
+                    "epoch": epoch,
+                    "step_in_epoch": step,
+                    "global_step": global_step,
+                    "lr": current_lr,
+                    "running_train_loss": running_loss,
+                    "running_train_acc": running_acc,
+                    "batch_size": batch_size,
+                },
+            )
 
-        pbar.set_postfix(
-            loss=f"{running_loss:.4f}",
-            acc=f"{running_acc:.4f}",
-            lr=f"{current_lr:.2e}",
-            bs=batch_size,
-        )
+        pbar.set_postfix(loss=f"{running_loss:.4f}", acc=f"{running_acc:.4f}", lr=f"{current_lr:.2e}", bs=batch_size)
 
     elapsed = time.time() - start_time
-    avg_loss = total_loss / max(total_samples, 1)
-    avg_acc = total_correct / max(total_samples, 1)
-
     return {
-        "loss": avg_loss,
-        "acc": avg_acc,
+        "loss": total_loss / max(total_samples, 1),
+        "acc": total_correct / max(total_samples, 1),
         "num_samples": total_samples,
         "time_sec": elapsed,
         "lr": optimizer.param_groups[0]["lr"],
@@ -286,14 +241,14 @@ def train_one_epoch(
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train DINOv2 on OHLC images (square-pad version).")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Train DeiT-III on OHLC images (rectangular input version).")
 
     parser.add_argument("--meta_path", type=str, required=True)
     parser.add_argument("--symbol_to_tar_json", type=str, required=True)
     parser.add_argument("--horizon_idx", type=int, required=True, choices=[0, 1, 2])
 
-    parser.add_argument("--hf_model_name", type=str, default="facebook/dinov2-base-imagenet1k-1-layer")
+    parser.add_argument("--hf_model_name", type=str, default="deit3_base_patch16_224.fb_in22k_ft_in1k")
 
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=64)
@@ -305,9 +260,12 @@ def main():
     parser.add_argument("--step_log_interval", type=int, default=100)
     parser.add_argument("--step_log_file", type=str, default="metrics_step.csv")
 
-    parser.add_argument("--pad_multiple", type=int, default=14)
-    parser.add_argument("--repeat_to_3ch", action="store_true", help="DINOv2 预训练建议打开")
-    parser.add_argument("--validate_members", action="store_true", help="是否再次检查 tar 成员。正式训练一般不开。")
+    parser.add_argument("--patch_size", type=int, default=16)
+    parser.add_argument("--repeat_to_3ch", action="store_true")
+    parser.add_argument("--validate_members", action="store_true")
+    parser.add_argument("--drop_rate", type=float, default=0.0)
+    parser.add_argument("--drop_path_rate", type=float, default=0.0)
+    parser.add_argument("--save_last", action="store_true")
 
     parser.add_argument("--out_dir", type=str, required=True)
 
@@ -323,31 +281,25 @@ def main():
 
     window = infer_window_from_meta(args.meta_path)
     horizon_days = horizon_idx_to_days(args.horizon_idx)
+    target_width = get_target_width(window, patch_size=args.patch_size)
+    target_height = 96
 
-    dataset_width = get_target_width(window, patch_size=args.pad_multiple)
-    dataset_width = ceil_to_multiple(dataset_width, args.pad_multiple)
-    dataset_height = 96
-
-    model_side = max(dataset_height, dataset_width)
-    model_side = ceil_to_multiple(model_side, args.pad_multiple)
-
-    exp_name = f"I{window}_R{horizon_days}_dinov2sq"
+    exp_name = f"I{window}_R{horizon_days}_deit3"
     print(f"experiment = {exp_name}")
     print(f"window = {window}")
     print(f"horizon_days = {horizon_days}")
-    print(f"dataset input shape = [3, {dataset_height}, {dataset_width}]")
-    print(f"model input shape   = [3, {model_side}, {model_side}]")
-    print(f"pad_multiple = {args.pad_multiple}")
+    print(f"target input shape = [3, {target_height}, {target_width}]")
+    print("finetune mode = full finetuning")
+    print("input normalization = ImageNet mean/std")
 
     config = vars(args).copy()
     config["window"] = window
     config["horizon_days"] = horizon_days
-    config["dataset_width"] = dataset_width
-    config["dataset_height"] = dataset_height
-    config["model_side"] = model_side
+    config["target_width"] = target_width
+    config["target_height"] = target_height
     config["device"] = str(device)
     config["normalization"] = "imagenet_mean_std"
-    config["runtime_square_pad"] = True
+    config["runtime_square_pad"] = False
 
     with open(os.path.join(args.out_dir, "config.json"), "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
@@ -370,7 +322,7 @@ def main():
         split="train",
         horizon_idx=args.horizon_idx,
         batch_size=args.batch_size,
-        patch_size=args.pad_multiple,
+        patch_size=args.patch_size,
         num_workers=args.num_workers,
         shuffle=True,
         repeat_to_3ch=args.repeat_to_3ch,
@@ -389,7 +341,7 @@ def main():
         split="val",
         horizon_idx=args.horizon_idx,
         batch_size=args.batch_size,
-        patch_size=args.pad_multiple,
+        patch_size=args.patch_size,
         num_workers=args.num_workers,
         shuffle=False,
         repeat_to_3ch=args.repeat_to_3ch,
@@ -406,13 +358,13 @@ def main():
     print(f"train dataset size = {len(train_set)}")
     print(f"val dataset size   = {len(val_set)}")
 
-    model = HFDinoV2BinaryClassifier(
+    model = TIMMDeiT3BinaryClassifier(
         model_name=args.hf_model_name,
         num_labels=2,
-        image_size=model_side,
+        img_size=(target_height, target_width),
+        drop_rate=args.drop_rate,
+        drop_path_rate=args.drop_path_rate,
     ).to(device)
-
-    print(f"dinov2_patch_size = {model.patch_size}")
 
     num_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -423,11 +375,7 @@ def main():
     print(f"trainable params = {trainable_params:,}")
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     num_update_steps_per_epoch = len(train_loader)
     num_training_steps = args.epochs * num_update_steps_per_epoch
@@ -451,10 +399,9 @@ def main():
 
     best_val_acc = -1.0
     best_epoch = -1
-
-    print("\n===== start training =====")
     global_step = 0
 
+    print("\n===== start training =====")
     for epoch in range(1, args.epochs + 1):
         train_metrics = train_one_epoch(
             model=model,
@@ -463,86 +410,54 @@ def main():
             optimizer=optimizer,
             scheduler=scheduler,
             device=device,
-            model_side=model_side,
             epoch=epoch,
-            total_epochs=args.epochs,
             step_log_interval=args.step_log_interval,
             step_csv_path=metrics_step_csv,
             global_step_start=global_step,
         )
+        global_step += train_metrics["num_steps"]
 
         val_metrics = evaluate(
             model=model,
             loader=val_loader,
             criterion=criterion,
             device=device,
-            model_side=model_side,
-            desc=f"Val {epoch}/{args.epochs}",
+            desc=f"Val Epoch {epoch}",
         )
 
-        row = {
+        epoch_row = {
             "epoch": epoch,
-            "lr": train_metrics["lr"],
             "train_loss": train_metrics["loss"],
             "train_acc": train_metrics["acc"],
-            "train_num_samples": train_metrics["num_samples"],
-            "train_time_sec": train_metrics["time_sec"],
             "val_loss": val_metrics["loss"],
             "val_acc": val_metrics["acc"],
+            "lr": train_metrics["lr"],
+            "train_num_samples": train_metrics["num_samples"],
             "val_num_samples": val_metrics["num_samples"],
+            "train_time_sec": train_metrics["time_sec"],
         }
-        append_metrics_csv(metrics_epoch_csv, row)
+        append_metrics_csv(metrics_epoch_csv, epoch_row)
 
         print(
-            f"[epoch {epoch:03d}] "
-            f"train_loss={train_metrics['loss']:.6f} "
-            f"train_acc={train_metrics['acc']:.4f} | "
-            f"val_loss={val_metrics['loss']:.6f} "
+            f"[Epoch {epoch}] "
+            f"train_loss={train_metrics['loss']:.4f}, "
+            f"train_acc={train_metrics['acc']:.4f}, "
+            f"val_loss={val_metrics['loss']:.4f}, "
             f"val_acc={val_metrics['acc']:.4f}"
         )
 
         if val_metrics["acc"] > best_val_acc:
-            best_val_acc = float(val_metrics["acc"])
-            best_epoch = int(epoch)
-            save_checkpoint(
-                ckpt_path=best_ckpt,
-                model=model,
-                optimizer=optimizer,
-                epoch=epoch,
-                best_val_acc=best_val_acc,
-                config=config,
-            )
-            print(f"saved new best checkpoint to: {best_ckpt}")
+            best_val_acc = val_metrics["acc"]
+            best_epoch = epoch
+            save_checkpoint(best_ckpt, model, optimizer, epoch, best_val_acc, config)
+            print(f"[BEST] saved to {best_ckpt} (epoch={epoch}, val_acc={best_val_acc:.4f})")
 
-        save_checkpoint(
-            ckpt_path=last_ckpt,
-            model=model,
-            optimizer=optimizer,
-            epoch=epoch,
-            best_val_acc=best_val_acc,
-            config=config,
-        )
-
-        global_step += train_metrics["num_steps"]
+        if args.save_last:
+            save_checkpoint(last_ckpt, model, optimizer, epoch, best_val_acc, config)
 
     print("\n===== training finished =====")
     print(f"best_epoch = {best_epoch}")
     print(f"best_val_acc = {best_val_acc:.6f}")
-
-    with open(os.path.join(args.out_dir, "summary.json"), "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "best_epoch": best_epoch,
-                "best_val_acc": best_val_acc,
-                "train_dataset_size": len(train_set),
-                "val_dataset_size": len(val_set),
-                "train_split_stats": train_stats,
-                "val_split_stats": val_stats,
-            },
-            f,
-            indent=2,
-            ensure_ascii=False,
-        )
 
     train_set.close()
     val_set.close()

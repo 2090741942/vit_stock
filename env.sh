@@ -33,6 +33,7 @@ packages=(
   pandas
   tqdm
   transformers
+  timm
 )
 
 # PyTorch CUDA index

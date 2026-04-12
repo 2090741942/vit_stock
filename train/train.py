@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 from transformers import ViTForImageClassification
 from transformers import get_cosine_schedule_with_warmup
 
-from dataset import build_dataloader, get_target_width
+from vit_stock.data.dataset import build_dataloader, get_target_width
 
 
 # =========================

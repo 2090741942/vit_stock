@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from tqdm.auto import tqdm
 from transformers import Dinov2Config, Dinov2ForImageClassification
 
-from dataset import build_dataloader, get_target_width
+from vit_stock.data.dataset import build_dataloader, get_target_width
 
 
 IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)

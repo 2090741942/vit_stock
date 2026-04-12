@@ -13,7 +13,7 @@ import torch.nn as nn
 from tqdm.auto import tqdm
 from transformers import ViTForImageClassification
 
-from dataset import build_dataloader, get_target_width
+from vit_stock.data.dataset import build_dataloader, get_target_width
 
 # 使用训练好的模型对测试集进行推理，输出包含 symbol、end_date、target、pred、prob_down、prob_up 的 CSV 文件，供后续分析使用。
 

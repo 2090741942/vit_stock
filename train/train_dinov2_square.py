@@ -13,12 +13,13 @@ from tqdm.auto import tqdm
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from transformers import SwinConfig, SwinForImageClassification
+from transformers import Dinov2Config, Dinov2ForImageClassification
 from transformers import get_cosine_schedule_with_warmup
 
-from dataset import build_dataloader, get_target_width
+from vit_stock.data.dataset import build_dataloader, get_target_width
 
 
 def set_seed(seed: int) -> None:
@@ -108,34 +109,39 @@ IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
 IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
 
-def normalize_for_swin(images: torch.Tensor) -> torch.Tensor:
+def normalize_for_dinov2(images: torch.Tensor) -> torch.Tensor:
     mean = IMAGENET_MEAN.to(device=images.device, dtype=images.dtype)
     std = IMAGENET_STD.to(device=images.device, dtype=images.dtype)
     return (images - mean) / std
 
 
-class HFSwinBinaryClassifier(nn.Module):
-    """
-    小窗口 Swin 二分类模型。
-    默认把预训练 checkpoint 的 window_size 从 7 改到 4，
-    并允许不匹配的参数（尤其相对位置偏置相关参数）被忽略后重新初始化。
-    """
+def pad_to_square(images: torch.Tensor, target_side: int) -> torch.Tensor:
+    if images.ndim != 4:
+        raise ValueError(f"images must be [B,C,H,W], got {tuple(images.shape)}")
 
+    _, _, h, w = images.shape
+    if h > target_side or w > target_side:
+        raise ValueError(f"current shape {(h, w)} is larger than target_side={target_side}")
+
+    pad_h = target_side - h
+    pad_w = target_side - w
+    return F.pad(images, (0, pad_w, 0, pad_h), mode="constant", value=0.0)
+
+
+class HFDinoV2BinaryClassifier(nn.Module):
     def __init__(
         self,
-        model_name: str = "microsoft/swin-tiny-patch4-window7-224",
+        model_name: str = "facebook/dinov2-base-imagenet1k-1-layer",
         num_labels: int = 2,
-        image_size: tuple[int, int] = (96, 64),
-        window_size: int = 4,
+        image_size: int = 224,
     ) -> None:
         super().__init__()
 
-        config = SwinConfig.from_pretrained(model_name)
+        config = Dinov2Config.from_pretrained(model_name)
         config.num_labels = num_labels
-        config.image_size = list(image_size)
-        config.window_size = int(window_size)
+        config.image_size = int(image_size)
 
-        self.model = SwinForImageClassification.from_pretrained(
+        self.model = Dinov2ForImageClassification.from_pretrained(
             model_name,
             config=config,
             ignore_mismatched_sizes=True,
@@ -144,11 +150,10 @@ class HFSwinBinaryClassifier(nn.Module):
         for p in self.model.parameters():
             p.requires_grad = True
 
+        self.patch_size = int(config.patch_size)
+
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        outputs = self.model(
-            pixel_values=pixel_values,
-            interpolate_pos_encoding=True,
-        )
+        outputs = self.model(pixel_values=pixel_values)
         return outputs.logits
 
 
@@ -158,6 +163,7 @@ def evaluate(
     loader: DataLoader,
     criterion: nn.Module,
     device: torch.device,
+    model_side: int,
     desc: str = "Eval",
 ) -> Dict[str, float]:
     model.eval()
@@ -172,7 +178,8 @@ def evaluate(
         images = images.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
-        images = normalize_for_swin(images)
+        images = pad_to_square(images, target_side=model_side)
+        images = normalize_for_dinov2(images)
 
         logits = model(images)
         loss = criterion(logits, targets)
@@ -185,11 +192,7 @@ def evaluate(
         running_loss = total_loss / max(total_samples, 1)
         running_acc = total_correct / max(total_samples, 1)
 
-        pbar.set_postfix(
-            loss=f"{running_loss:.4f}",
-            acc=f"{running_acc:.4f}",
-            bs=batch_size,
-        )
+        pbar.set_postfix(loss=f"{running_loss:.4f}", acc=f"{running_acc:.4f}", bs=batch_size)
 
     avg_loss = total_loss / max(total_samples, 1)
     avg_acc = total_correct / max(total_samples, 1)
@@ -208,6 +211,7 @@ def train_one_epoch(
     optimizer: torch.optim.Optimizer,
     scheduler,
     device: torch.device,
+    model_side: int,
     epoch: int,
     total_epochs: int,
     step_log_interval: int,
@@ -227,7 +231,8 @@ def train_one_epoch(
         images = images.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
-        images = normalize_for_swin(images)
+        images = pad_to_square(images, target_side=model_side)
+        images = normalize_for_dinov2(images)
 
         optimizer.zero_grad(set_to_none=True)
 
@@ -282,14 +287,13 @@ def train_one_epoch(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train small-window Swin on OHLC images.")
+    parser = argparse.ArgumentParser(description="Train DINOv2 on OHLC images (square-pad version).")
 
     parser.add_argument("--meta_path", type=str, required=True)
     parser.add_argument("--symbol_to_tar_json", type=str, required=True)
     parser.add_argument("--horizon_idx", type=int, required=True, choices=[0, 1, 2])
 
-    parser.add_argument("--hf_model_name", type=str, default="microsoft/swin-tiny-patch4-window7-224")
-    parser.add_argument("--swin_window_size", type=int, default=4)
+    parser.add_argument("--hf_model_name", type=str, default="facebook/dinov2-base-imagenet1k-1-layer")
 
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=64)
@@ -301,8 +305,8 @@ def main():
     parser.add_argument("--step_log_interval", type=int, default=100)
     parser.add_argument("--step_log_file", type=str, default="metrics_step.csv")
 
-    parser.add_argument("--pad_multiple", type=int, default=32)
-    parser.add_argument("--repeat_to_3ch", action="store_true", help="预训练 Swin 建议打开")
+    parser.add_argument("--pad_multiple", type=int, default=14)
+    parser.add_argument("--repeat_to_3ch", action="store_true", help="DINOv2 预训练建议打开")
     parser.add_argument("--validate_members", action="store_true", help="是否再次检查 tar 成员。正式训练一般不开。")
 
     parser.add_argument("--out_dir", type=str, required=True)
@@ -320,25 +324,30 @@ def main():
     window = infer_window_from_meta(args.meta_path)
     horizon_days = horizon_idx_to_days(args.horizon_idx)
 
-    target_width = get_target_width(window, patch_size=args.pad_multiple)
-    target_width = ceil_to_multiple(target_width, args.pad_multiple)
-    input_height = 96
+    dataset_width = get_target_width(window, patch_size=args.pad_multiple)
+    dataset_width = ceil_to_multiple(dataset_width, args.pad_multiple)
+    dataset_height = 96
 
-    exp_name = f"I{window}_R{horizon_days}_swinw{args.swin_window_size}"
+    model_side = max(dataset_height, dataset_width)
+    model_side = ceil_to_multiple(model_side, args.pad_multiple)
+
+    exp_name = f"I{window}_R{horizon_days}_dinov2sq"
     print(f"experiment = {exp_name}")
     print(f"window = {window}")
     print(f"horizon_days = {horizon_days}")
-    print(f"target input shape = [3, {input_height}, {target_width}]")
+    print(f"dataset input shape = [3, {dataset_height}, {dataset_width}]")
+    print(f"model input shape   = [3, {model_side}, {model_side}]")
     print(f"pad_multiple = {args.pad_multiple}")
-    print(f"swin_window_size = {args.swin_window_size}")
 
     config = vars(args).copy()
     config["window"] = window
     config["horizon_days"] = horizon_days
-    config["target_width"] = target_width
-    config["input_height"] = input_height
+    config["dataset_width"] = dataset_width
+    config["dataset_height"] = dataset_height
+    config["model_side"] = model_side
     config["device"] = str(device)
     config["normalization"] = "imagenet_mean_std"
+    config["runtime_square_pad"] = True
 
     with open(os.path.join(args.out_dir, "config.json"), "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
@@ -397,12 +406,13 @@ def main():
     print(f"train dataset size = {len(train_set)}")
     print(f"val dataset size   = {len(val_set)}")
 
-    model = HFSwinBinaryClassifier(
+    model = HFDinoV2BinaryClassifier(
         model_name=args.hf_model_name,
         num_labels=2,
-        image_size=(input_height, target_width),
-        window_size=args.swin_window_size,
+        image_size=model_side,
     ).to(device)
+
+    print(f"dinov2_patch_size = {model.patch_size}")
 
     num_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -453,6 +463,7 @@ def main():
             optimizer=optimizer,
             scheduler=scheduler,
             device=device,
+            model_side=model_side,
             epoch=epoch,
             total_epochs=args.epochs,
             step_log_interval=args.step_log_interval,
@@ -465,6 +476,7 @@ def main():
             loader=val_loader,
             criterion=criterion,
             device=device,
+            model_side=model_side,
             desc=f"Val {epoch}/{args.epochs}",
         )
 
