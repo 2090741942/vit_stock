@@ -13,13 +13,19 @@ CSV_ROOT="/workspace/stock_csv_8year"
 TRAIN_MODULE="vit_stock.deit3.train_deit3_rect"
 INFER_MODULE="vit_stock.deit3.infer_test_deit3_rect"
 
-BACKTEST_PY=""
-if [[ -f "${PROJECT_ROOT}/backtest/portfolio_backtest.py" ]]; then
-  BACKTEST_PY="${PROJECT_ROOT}/backtest/portfolio_backtest.py"
-elif [[ -f "${PROJECT_ROOT}/backtest/portfolio_backtest_with_costs_turnover_topn.py" ]]; then
-  BACKTEST_PY="${PROJECT_ROOT}/backtest/portfolio_backtest_with_costs_turnover_topn.py"
-else
-  echo "[ERROR] backtest script not found under ${PROJECT_ROOT}/backtest"
+# BACKTEST_PY=""
+# if [[ -f "${PROJECT_ROOT}/backtest/portfolio_backtest.py" ]]; then
+#   BACKTEST_PY="${PROJECT_ROOT}/backtest/portfolio_backtest.py"
+# elif [[ -f "${PROJECT_ROOT}/backtest/portfolio_backtest_with_costs_turnover_topn.py" ]]; then
+#   BACKTEST_PY="${PROJECT_ROOT}/backtest/portfolio_backtest_with_costs_turnover_topn.py"
+# else
+#   echo "[ERROR] backtest script not found under ${PROJECT_ROOT}/backtest"
+#   exit 1
+# fi
+
+BACKTEST_PY="${PROJECT_ROOT}/backtest/portfolio_backtest_summary_only_with_turnover_all_rows.py"
+if [[ ! -f "${BACKTEST_PY}" ]]; then
+  echo "[ERROR] backtest script not found: ${BACKTEST_PY}"
   exit 1
 fi
 
