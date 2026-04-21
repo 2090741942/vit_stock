@@ -20,10 +20,6 @@ from transformers import DINOv3ViTModel, get_cosine_schedule_with_warmup
 from vit_stock.data.dataset import build_dataloader, get_target_width
 
 
-# =========================
-# utils
-# =========================
-
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -57,10 +53,10 @@ def count_split_stats(meta_path: str, split: str, horizon_idx: int) -> Dict[str,
     splits = meta["split"]
 
     y = labels[:, horizon_idx]
-    split_mask = (splits == split_map[split])
+    split_mask = splits == split_map[split]
 
     raw_split_rows = int(split_mask.sum())
-    valid_label_rows = int(((split_mask) & (y != -1)).sum())
+    valid_label_rows = int((split_mask & (y != -1)).sum())
     dropped_label_minus1 = raw_split_rows - valid_label_rows
 
     return {
@@ -101,10 +97,6 @@ def save_checkpoint(
     )
 
 
-# =========================
-# normalization
-# =========================
-
 IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
 IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
@@ -115,19 +107,7 @@ def normalize_for_dinov3(images: torch.Tensor) -> torch.Tensor:
     return (images - mean) / std
 
 
-# =========================
-# model
-# =========================
-
 class HFDinoV3BinaryClassifier(nn.Module):
-    """
-    使用 Hugging Face DINOv3ViTModel 作为 backbone，
-    自己接一个二分类头。
-
-    这里不用 square pad，直接吃 [B,3,H,W] 的长方形图像，
-    只要求 H/W 都是 patch_size 的整数倍。
-    """
-
     def __init__(
         self,
         model_name: str = "facebook/dinov3-vits16-pretrain-lvd1689m",
@@ -158,10 +138,9 @@ class HFDinoV3BinaryClassifier(nn.Module):
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         outputs = self.backbone(pixel_values=pixel_values)
-        x = outputs.last_hidden_state  # [B, 1 + reg + num_patches, C]
+        x = outputs.last_hidden_state
 
         cls_token = x[:, 0, :]
-
         if self.pool_mode == "cls":
             feat = cls_token
         else:
@@ -170,13 +149,8 @@ class HFDinoV3BinaryClassifier(nn.Module):
             feat = torch.cat([cls_token, patch_mean], dim=1)
 
         feat = self.dropout(feat)
-        logits = self.classifier(feat)
-        return logits
+        return self.classifier(feat)
 
-
-# =========================
-# eval
-# =========================
 
 @torch.no_grad()
 def evaluate(
@@ -193,7 +167,6 @@ def evaluate(
     total_samples = 0
 
     pbar = tqdm(loader, desc=desc, leave=False, dynamic_ncols=True)
-
     for images, targets in pbar:
         images = images.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
@@ -219,10 +192,6 @@ def evaluate(
     }
 
 
-# =========================
-# main
-# =========================
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train DINOv3 binary classifier on OHLC images.")
 
@@ -233,17 +202,18 @@ def main() -> None:
     parser.add_argument("--hf_model_name", type=str, default="facebook/dinov3-vits16-pretrain-lvd1689m")
     parser.add_argument("--horizon_idx", type=int, required=True, choices=[0, 1, 2])
 
-    parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
-    parser.add_argument("--num_workers", type=int, default=12)
+    parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=20260315)
     parser.add_argument("--warmup_ratio", type=float, default=0.05)
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--pool_mode", type=str, default="cls_mean_patch", choices=["cls", "cls_mean_patch"])
     parser.add_argument("--save_last", action="store_true")
-    parser.add_argument("--step_log_interval", type=int, default=100)
+    parser.add_argument("--step_log_interval", type=int, default=5000)
+    parser.add_argument("--validate_members", action="store_true")
 
     args = parser.parse_args()
 
@@ -273,11 +243,10 @@ def main() -> None:
     train_stats = count_split_stats(args.meta_path, split="train", horizon_idx=args.horizon_idx)
     val_stats = count_split_stats(args.meta_path, split="val", horizon_idx=args.horizon_idx)
     test_stats = count_split_stats(args.meta_path, split="test", horizon_idx=args.horizon_idx)
-
     print("split stats:")
     print(json.dumps({"train": train_stats, "val": val_stats, "test": test_stats}, indent=2, ensure_ascii=False))
 
-    train_loader = build_dataloader(
+    train_loader, train_dataset = build_dataloader(
         meta_path=args.meta_path,
         split="train",
         horizon_idx=args.horizon_idx,
@@ -286,9 +255,10 @@ def main() -> None:
         num_workers=args.num_workers,
         shuffle=True,
         return_meta=False,
+        validate_members=args.validate_members,
     )
 
-    val_loader = build_dataloader(
+    val_loader, val_dataset = build_dataloader(
         meta_path=args.meta_path,
         split="val",
         horizon_idx=args.horizon_idx,
@@ -297,7 +267,13 @@ def main() -> None:
         num_workers=args.num_workers,
         shuffle=False,
         return_meta=False,
+        validate_members=args.validate_members,
     )
+
+    print(f"len(train_dataset) = {len(train_dataset)}")
+    print(f"len(val_dataset)   = {len(val_dataset)}")
+    print(f"len(train_loader)  = {len(train_loader)}")
+    print(f"len(val_loader)    = {len(val_loader)}")
 
     model = HFDinoV3BinaryClassifier(
         model_name=args.hf_model_name,
@@ -373,7 +349,7 @@ def main() -> None:
 
             pbar.set_postfix(loss=f"{train_loss:.4f}", acc=f"{train_acc:.4f}", lr=f"{lr_now:.2e}")
 
-            if global_step % args.step_log_interval == 0:
+            if args.step_log_interval > 0 and global_step % args.step_log_interval == 0:
                 append_metrics_csv(
                     metrics_csv,
                     {

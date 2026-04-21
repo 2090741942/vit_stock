@@ -27,10 +27,9 @@ TRAIN_MODULE="vit_stock.dinov3.train_dinov3_rect"
 INFER_MODULE="vit_stock.dinov3.infer_test_dinov3_rect"
 
 BACKTEST_SCRIPT=""
-if [[ -f "/workspace/vit_stock/backtest/portfolio_backtest.py" ]]; then
-  BACKTEST_SCRIPT="/workspace/vit_stock/backtest/portfolio_backtest.py"
-elif [[ -f "/workspace/vit_stock/backtest/portfolio_backtest_with_costs_turnover_topn.py" ]]; then
-  BACKTEST_SCRIPT="/workspace/vit_stock/backtest/portfolio_backtest_with_costs_turnover_topn.py"
+
+if [[ -f "/workspace/vit_stock/backtest/portfolio_backtest_with_costs_turnover_topn_all_rows.py" ]]; then
+  BACKTEST_SCRIPT="/workspace/vit_stock/backtest/portfolio_backtest_with_costs_turnover_topn_all_rows.py"
 else
   echo "[ERROR] backtest script not found under /workspace/vit_stock/backtest" >&2
   exit 1

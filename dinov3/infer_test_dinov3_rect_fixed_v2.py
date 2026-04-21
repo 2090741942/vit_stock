@@ -68,8 +68,7 @@ class HFDinoV3BinaryClassifier(nn.Module):
             feat = torch.cat([cls_token, patch_mean], dim=1)
 
         feat = self.dropout(feat)
-        logits = self.classifier(feat)
-        return logits
+        return self.classifier(feat)
 
 
 @torch.no_grad()
@@ -125,11 +124,12 @@ def main() -> None:
     parser.add_argument("--hf_model_name", type=str, default="facebook/dinov3-vits16-pretrain-lvd1689m")
 
     parser.add_argument("--horizon_idx", type=int, required=True, choices=[0, 1, 2])
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--num_workers", type=int, default=8)
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--pool_mode", type=str, default="cls_mean_patch", choices=["cls", "cls_mean_patch"])
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--out_csv", type=str, required=True)
+    parser.add_argument("--validate_members", action="store_true")
 
     args = parser.parse_args()
 
@@ -147,7 +147,7 @@ def main() -> None:
     print(f"out_csv         : {args.out_csv}")
     print("=" * 80)
 
-    loader = build_dataloader(
+    loader, test_dataset = build_dataloader(
         meta_path=args.meta_path,
         split="test",
         horizon_idx=args.horizon_idx,
@@ -156,7 +156,11 @@ def main() -> None:
         num_workers=args.num_workers,
         shuffle=False,
         return_meta=True,
+        validate_members=args.validate_members,
     )
+
+    print(f"len(test_dataset) = {len(test_dataset)}")
+    print(f"len(test_loader)  = {len(loader)}")
 
     model = HFDinoV3BinaryClassifier(
         model_name=args.hf_model_name,
