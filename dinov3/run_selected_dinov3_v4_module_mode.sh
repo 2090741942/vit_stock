@@ -14,7 +14,7 @@ DATA_ROOT="/workspace/vit_stock_data"
 CSV_ROOT="/workspace/stock_csv_8year"
 
 # 你的项目需要用 -m 模块导入方式运行
-TRAIN_MODULE="vit_stock.dinov3.train_dinov3_rect_fixed_v3"
+TRAIN_MODULE="vit_stock.dinov3.train_dinov3_final"
 INFER_MODULE="vit_stock.dinov3.infer_test_dinov3_rect_fixed_v2"
 
 BACKTEST_SCRIPT="${PROJECT_ROOT}/backtest/portfolio_backtest_summary_only_with_turnover_all_rows.py"
